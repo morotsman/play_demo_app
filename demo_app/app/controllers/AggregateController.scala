@@ -22,8 +22,8 @@ import play.api.libs.ws._
 
 class AggregateController @Inject() (ws: WSClient,actorSystem: ActorSystem)(implicit exec: ExecutionContext)extends Controller{
   
-  val important: WSRequest = ws.url("http://localhost:9000/mock-service/important").withRequestTimeout(2000.millis)
-  val notImportant: WSRequest = ws.url("http://localhost:9000/mock-service/not_important").withRequestTimeout(2000.millis)
+  val importantRequest: WSRequest = ws.url("http://localhost:9000/mock-service/important").withRequestTimeout(2000.millis)
+  val notImportantRequest: WSRequest = ws.url("http://localhost:9000/mock-service/not_important").withRequestTimeout(2000.millis)
   
   val importantBreaker =
     new CircuitBreaker(actorSystem.scheduler, maxFailures = 5, callTimeout = 2.seconds, resetTimeout = 1.minute).onOpen(notifyMeOnOpen("important"))
@@ -36,14 +36,14 @@ class AggregateController @Inject() (ws: WSClient,actorSystem: ActorSystem)(impl
   
   
   def aggregate = Action.async {
-    val r1 = importantBreaker.withCircuitBreaker(important.get().map(r => r.body))
-    val r2 = notImportantBreaker.withCircuitBreaker(notImportant.get().map(r => r.body)).recoverWith{
+    val important = importantBreaker.withCircuitBreaker(importantRequest.get().map(r => r.body))
+    val notImportant = notImportantBreaker.withCircuitBreaker(notImportantRequest.get().map(r => r.body)).recoverWith{
       case e => Future("Nothing important anyway") 
     }
     
     val aggregatedResponse = for(
-        response1 <- r1;
-        response2 <- r2
+        response1 <- important;
+        response2 <- notImportant
     ) yield (response1, response2)
      
     aggregatedResponse.map { aggregated =>
