@@ -20,19 +20,34 @@ import akka.pattern.ask
 
 import play.api.libs.ws._
 
-class AggregateController @Inject() (ws: WSClient,actorSystem: ActorSystem)(implicit exec: ExecutionContext)extends Controller{
+class AggregateController @Inject() (ws: WSClient,actorSystem: ActorSystem, configuration: play.api.Configuration)(implicit exec: ExecutionContext)extends Controller{
   
-  val importantRequest: WSRequest = ws.url("http://localhost:9000/mock-service/important").withRequestTimeout(2000.millis)
-  val notImportantRequest: WSRequest = ws.url("http://localhost:9000/mock-service/not_important").withRequestTimeout(2000.millis)
+  val importantUrl = configuration.getString("importantUrl").get
+  val importantTimeOutInMillis = configuration.getInt("importantTimeOutInMillis").get
+  
+  val notImportantUrl = configuration.getString("notImportantUrl").get
+  val notImportantTimeOutInMillis = configuration.getInt("notImportantTimeOutInMillis").get
+  
+
+  val importantRequest: WSRequest = ws.url(importantUrl).withRequestTimeout(importantTimeOutInMillis.millis)
+  val notImportantRequest: WSRequest = ws.url(notImportantUrl).withRequestTimeout(notImportantTimeOutInMillis.millis)
   
   val importantBreaker =
-    new CircuitBreaker(actorSystem.scheduler, maxFailures = 5, callTimeout = 2.seconds, resetTimeout = 1.minute).onOpen(notifyMeOnOpen("important"))
+    new CircuitBreaker(actorSystem.scheduler, maxFailures = 5, callTimeout = importantTimeOutInMillis.millis, resetTimeout = 1.minute)
+      .onClose(notifyMe("important", "closed"))
+      .onOpen(notifyMe("important", "open"))
+      .onHalfOpen(notifyMe("important", "half open"))
+      
       
   val notImportantBreaker =
-    new CircuitBreaker(actorSystem.scheduler, maxFailures = 5, callTimeout = 2.seconds, resetTimeout = 1.minute).onOpen(notifyMeOnOpen("not_important"))      
+    new CircuitBreaker(actorSystem.scheduler, maxFailures = 5, callTimeout = notImportantTimeOutInMillis.millis, resetTimeout = 1.minute)
+      .onClose(notifyMe("not_important", "closed"))
+      .onOpen(notifyMe("not_important", "open"))
+      .onHalfOpen(notifyMe("not_important", "half open"))
+    
  
-  def notifyMeOnOpen(source: String): Unit =
-    println(s"$source: CircuitBreaker is now open, and will not close for one minute")
+  def notifyMe(source: String, status: String): Unit =
+    println(s"$source: CircuitBreaker is now $status")
   
   
   def aggregate = Action.async {
