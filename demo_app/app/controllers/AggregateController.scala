@@ -42,19 +42,13 @@ class AggregateController @Inject() (ws: WSClient, actorSystem: ActorSystem, con
       .onOpen(notifyMe("not_important", "open"))
       .onHalfOpen(notifyMe("not_important", "half open"))
 
-  def notifyMe(source: String, status: String): Unit =
-    println(s"$source: CircuitBreaker is now $status")
 
+  //handles route /important
   def important = Action.async {
-    importantBreaker.withCircuitBreaker(importantRequest.get().map(r => r.body))
-      .map { i => Ok(i) }.recoverWith(errorHandler)
+    importantBreaker.withCircuitBreaker(importantRequest.get().map(r => Ok(r.body))).recoverWith(errorHandler)
   }
 
-  val errorHandler: PartialFunction[Throwable, Future[Result]] = {
-    case e: TimeoutException            => Future(RequestTimeout)
-    case e: CircuitBreakerOpenException => Future(RequestTimeout)
-  }
-
+  //handles route /aggregate
   def aggregate = Action.async {
     val important = importantBreaker.withCircuitBreaker(importantRequest.get().map(r => r.body))
     val notImportant = notImportantBreaker.withCircuitBreaker(notImportantRequest.get().map(r => r.body)).recoverWith(notImportantErrorHandler)
@@ -62,13 +56,21 @@ class AggregateController @Inject() (ws: WSClient, actorSystem: ActorSystem, con
     val aggregatedResponse = for (
       response1 <- important;
       response2 <- notImportant
-    ) yield (response1, response2)
+    ) yield Ok(response1 + " ; " + response2)
 
-    aggregatedResponse.map { aggregated => Ok(aggregated._1 + " ; " + aggregated._2)}.recoverWith(errorHandler)
+    aggregatedResponse.recoverWith(errorHandler)
+  }
+  
+  val errorHandler: PartialFunction[Throwable, Future[Result]] = {
+    case e: TimeoutException            => Future(RequestTimeout)
+    case e: CircuitBreakerOpenException => Future(RequestTimeout)
   }
   
   val notImportantErrorHandler: PartialFunction[Throwable, Future[String]] = {
-    case e => Future("Nothing important anyway")
+    case e => Future("Nothing to important anyway")
   }
+  
+  def notifyMe(source: String, status: String): Unit =
+    println(s"$source: CircuitBreaker is now $status")  
 
 }
