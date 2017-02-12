@@ -3,7 +3,8 @@
 # ~~~~
 
 
-GET /aggregate/						controllers.AggregateController.aggregate
+GET /aggregate						controllers.AggregateController.aggregate
+GET /important						controllers.AggregateController.important
 
 
 
