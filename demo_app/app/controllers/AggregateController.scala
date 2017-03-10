@@ -44,21 +44,24 @@ class AggregateController @Inject() (ws: WSClient, actorSystem: ActorSystem, con
       .onOpen(notifyMe("not_important", "open"))
       .onHalfOpen(notifyMe("not_important", "half open"))
 
-
   //handles route /important
   def important = Action.async {
-    importantBreaker.withCircuitBreaker {
-      importantRequest.get().map(mapImportantResponse)
-    }.recoverWith(errorHandler)
+    importantBreaker
+      .withCircuitBreaker(importantRequest.get().map(mapResponse).map(Ok(_)))
+      .recoverWith(errorHandler)
+  }
+
+  def mapResponse(r: WSResponse): String =
+    if (r.status == 200) r.body else throw new RuntimeException("Error when calling external service")
+
+  val errorHandler: PartialFunction[Throwable, Future[Result]] = {
+    case _ => Future(InternalServerError)
   }
 
   //handles route /aggregate
   def aggregate = Action.async {
-    val important: Future[String] = 
-      importantBreaker.withCircuitBreaker(importantRequest.get().map(mapAggregateImportantResponse))
-    
-    val notImportant: Future[String] = 
-      notImportantBreaker.withCircuitBreaker(notImportantRequest.get().map(mapAggregateNonImportantResponse)).recoverWith(notImportantErrorHandler)
+    val important: Future[String] = makeImportantCall
+    val notImportant = makeNonImportantCall
 
     val aggregatedResponse: Future[Result] = for (
       response1 <- important;
@@ -67,28 +70,21 @@ class AggregateController @Inject() (ws: WSClient, actorSystem: ActorSystem, con
 
     aggregatedResponse.recoverWith(errorHandler)
   }
-  
-  def mapImportantResponse(r: WSResponse) : Result = if(r.status == 200) Ok(r.body) else InternalServerError("Error when calling external system.")
-  
-  def mapAggregateNonImportantResponse(r: WSResponse) : String = 
-    if(r.status ==200) r.body else throw new RuntimeException("Error when calling non important service")
- 
-  
-  def mapAggregateImportantResponse(r: WSResponse) : String = 
-    if(r.status ==200) r.body else throw new RuntimeException("Error when calling important service")
- 
-  
-  val errorHandler: PartialFunction[Throwable, Future[Result]] = {
-    case e: TimeoutException            => Future(RequestTimeout)
-    case e: CircuitBreakerOpenException => Future(RequestTimeout)
-    case _ => Future(InternalServerError) 
-  }
-  
+
+  def makeImportantCall: Future[String] =
+    importantBreaker
+      .withCircuitBreaker(importantRequest.get().map(mapResponse))
+
+  def makeNonImportantCall: Future[String] =
+    notImportantBreaker
+      .withCircuitBreaker(notImportantRequest.get().map(mapResponse))
+      .recoverWith(notImportantErrorHandler)
+
   val notImportantErrorHandler: PartialFunction[Throwable, Future[String]] = {
     case e => Future("Nothing to important anyway")
   }
-  
+
   def notifyMe(source: String, status: String): Unit =
-    println(s"$source: CircuitBreaker is now $status")  
+    println(s"$source: CircuitBreaker is now $status")
 
 }
